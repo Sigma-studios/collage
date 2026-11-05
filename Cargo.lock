@@ -626,6 +626,7 @@ dependencies = [
  "tiny-skia",
  "toml",
  "wayland-client",
+ "wayland-protocols",
  "wayland-protocols-wlr",
 ]
 

@@ -27,20 +27,14 @@ use smithay_client_toolkit::{
     shell::wlr_layer::LayerShell,
     shm::Shm,
 };
-use wayland_client::{Connection, Proxy, QueueHandle, globals::registry_queue_init, protocol::wl_seat::WlSeat};
-use wayland_protocols_wlr::data_control::v1::client::{
-    zwlr_data_control_device_v1::ZwlrDataControlDeviceV1,
-    zwlr_data_control_manager_v1::ZwlrDataControlManagerV1,
-    zwlr_data_control_offer_v1::ZwlrDataControlOfferV1,
-    zwlr_data_control_source_v1::ZwlrDataControlSourceV1,
-};
+use wayland_client::{Connection, QueueHandle, globals::registry_queue_init, protocol::wl_seat::WlSeat};
 
 use crate::config::Config;
 use crate::ipc::{self, Request};
 use crate::store::{Kind, Store};
 use crate::text;
 use crate::tray;
-use clipboard::{MARKER, OfferData, SourceData, TEXT_MIMES, is_secret, pick_text};
+use clipboard::{Device, MARKER, Manager, Offer, Source, SourceData, TEXT_MIMES, is_secret, pick_text};
 use toast::{Toast, ToastKind};
 
 /// Messages delivered to the main loop from helper threads and the tray.
@@ -72,11 +66,11 @@ pub struct Daemon {
     layer_shell: LayerShell,
     shm: Shm,
 
-    manager: ZwlrDataControlManagerV1,
-    device: ZwlrDataControlDeviceV1,
-    clip_offer: Option<ZwlrDataControlOfferV1>,
-    primary_offer: Option<ZwlrDataControlOfferV1>,
-    own_source: Option<ZwlrDataControlSourceV1>,
+    manager: Manager,
+    device: Device,
+    clip_offer: Option<Offer>,
+    primary_offer: Option<Offer>,
+    own_source: Option<Source>,
     /// Last text we know was on the clipboard, re-offered if it empties.
     last_text: Option<String>,
     clip_generation: u64,
@@ -105,13 +99,12 @@ pub fn run(cfg: Config) -> Result<()> {
     let layer_shell = LayerShell::bind(&globals, &qh).context("layer-shell missing")?;
     let shm = Shm::bind(&globals, &qh).context("wl_shm missing")?;
     let seat: WlSeat = globals.bind(&qh, 1..=8, ()).context("wl_seat missing")?;
-    let manager: ZwlrDataControlManagerV1 = globals
-        .bind(&qh, 1..=2, ())
-        .context("the compositor doesn't support wlr-data-control (needed to watch the clipboard)")?;
-    if manager.version() < 2 {
-        log::warn!("data-control v1 only: saving notes from the selection won't work");
+    let manager = Manager::bind(&globals, &qh)?;
+    log::info!("clipboard protocol: {}", manager.name());
+    if !manager.supports_primary() {
+        log::warn!("no primary selection support: saving notes with Meta+S won't work");
     }
-    let device = manager.get_data_device(&seat, &qh, ());
+    let device = manager.get_device(&seat, &qh);
 
     let (tx, rx) = calloop::channel::channel::<Event>();
     loop_handle
@@ -213,7 +206,7 @@ impl Daemon {
 
     // ---- clipboard ------------------------------------------------------
 
-    fn on_selection(&mut self, offer: Option<ZwlrDataControlOfferV1>) {
+    fn on_selection(&mut self, offer: Option<Offer>) {
         if let Some(old) = self.clip_offer.take() {
             old.destroy();
         }
@@ -231,7 +224,7 @@ impl Daemon {
             return;
         };
 
-        let mimes = OfferData::mimes(&offer);
+        let mimes = offer.mimes();
         if mimes.iter().any(|m| m == MARKER) {
             // Our own source — nothing new.
         } else if is_secret(&mimes) {
@@ -256,14 +249,14 @@ impl Daemon {
         self.clip_offer = Some(offer);
     }
 
-    fn on_primary(&mut self, offer: Option<ZwlrDataControlOfferV1>) {
+    fn on_primary(&mut self, offer: Option<Offer>) {
         if let Some(old) = std::mem::replace(&mut self.primary_offer, offer) {
             old.destroy();
         }
     }
 
     fn save_selection_as_note(&mut self) -> Result<()> {
-        if self.manager.version() < 2 {
+        if !self.manager.supports_primary() {
             self.show_toast(ToastKind::Error, "Can't save note", Some("compositor lacks primary selection support".into()));
             return Err(anyhow!("primary selection unsupported"));
         }
@@ -271,7 +264,7 @@ impl Daemon {
             self.show_toast(ToastKind::Info, "Nothing selected", Some("highlight some text first".into()));
             return Ok(());
         };
-        let mimes = OfferData::mimes(&offer);
+        let mimes = offer.mimes();
         if is_secret(&mimes) {
             self.show_toast(ToastKind::Info, "Not saved", Some("selection is a password".into()));
             return Ok(());
@@ -286,12 +279,12 @@ impl Daemon {
     /// Ask the selection owner to write `mime` into a pipe; a helper thread
     /// reads it and reports back through the channel, so a slow app never
     /// blocks the event loop.
-    fn read_offer(&self, offer: &ZwlrDataControlOfferV1, mime: &str, purpose: Purpose) {
+    fn read_offer(&self, offer: &Offer, mime: &str, purpose: Purpose) {
         let (mut reader, writer) = match std::io::pipe() {
             Ok(pipe) => pipe,
             Err(e) => return log::warn!("pipe: {e}"),
         };
-        offer.receive(mime.to_string(), writer.as_fd());
+        offer.receive(mime, writer.as_fd());
         if let Err(e) = self.conn.flush() {
             log::warn!("flush: {e}");
         }
@@ -363,12 +356,12 @@ impl Daemon {
     /// Become the clipboard owner and serve `text`.
     fn set_clipboard(&mut self, text: String) {
         let data = SourceData::new(text.as_bytes().to_vec());
-        let source = self.manager.create_data_source(&self.qh, data);
+        let source = self.manager.create_source(&self.qh, data);
         for mime in TEXT_MIMES {
-            source.offer(mime.to_string());
+            source.offer(mime);
         }
-        source.offer(MARKER.to_string());
-        self.device.set_selection(Some(&source));
+        source.offer(MARKER);
+        self.device.set_selection(&source);
         if let Some(old) = self.own_source.replace(source) {
             old.destroy();
         }

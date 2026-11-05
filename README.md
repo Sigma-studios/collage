@@ -63,14 +63,14 @@ Data is stored in `~/.local/share/collage/collage.db` (SQLite). Config is `~/.co
 
 ## How it works
 
-- `collage daemon` watches the clipboard and the primary selection (highlighted text) through the **wlr-data-control** Wayland protocol, which KWin supports. It saves new text copies to history and draws the toast on a click-through **layer-shell** surface (tiny-skia + cosmic-text, CPU only).
+- `collage daemon` watches the clipboard and the primary selection (highlighted text) through the Wayland **data-control** protocol. It uses the standard `ext-data-control-v1` (what current KWin offers) and falls back to the older `wlr-data-control` on compositors that only have that. It saves new text copies to history and draws the toast on a click-through **layer-shell** surface (tiny-skia + cosmic-text, CPU only).
 - `collage note` asks the daemon to read the current primary selection. That's the text you highlighted; middle-click pastes the same thing. So no copy keystroke is sent and the clipboard isn't touched.
 - `collage popup` is a separate short-lived process (iced + iced_layershell). It reads the database directly and asks the daemon to set the clipboard, so the copied text stays available after the popup closes.
 
 ## Troubleshooting
 
 - Run `RUST_LOG=collage=debug collage daemon` in a terminal to see what's happening. Stop the service first with `systemctl --user stop collage`.
-- `wayland-info | grep data_control` should list `zwlr_data_control_manager_v1`, version 2 or higher, for Meta+S to work.
+- `wayland-info | grep data_control` should list `ext_data_control_manager_v1`, or on older compositors `zwlr_data_control_manager_v1` at version 2 or higher (needed for Meta+S). When the daemon starts, it logs which protocol it picked.
 - The popup uses the GPU (wgpu). If it misbehaves, try `ICED_BACKEND=tiny-skia collage popup`.
 - A few apps don't set the primary selection (some Electron apps). Meta+S can't see their highlighted text; the toast says "Nothing selected".
 
