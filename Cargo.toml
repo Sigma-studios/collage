@@ -1,0 +1,30 @@
+[package]
+name = "collage"
+version = "0.1.0"
+edition = "2024"
+description = "Clipboard manager for KDE Plasma (Wayland): copy toasts, notes, history popup"
+license = "MIT"
+
+[dependencies]
+anyhow = "1"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+clap = { version = "4", features = ["derive"] }
+cosmic-text = "0.15"
+dirs = "6"
+env_logger = "0.11"
+iced = { version = "0.14", default-features = false, features = ["tiny-skia", "wgpu", "wayland", "thread-pool"] }
+iced_layershell = "0.19"
+ksni = { version = "0.3", features = ["blocking"] }
+libc = "0.2"
+log = "0.4"
+rusqlite = "0.37"
+serde = { version = "1", features = ["derive"] }
+smithay-client-toolkit = { version = "0.20", default-features = false, features = ["calloop"] }
+tiny-skia = "0.11"
+toml = "0.9"
+wayland-client = "0.31"
+wayland-protocols-wlr = { version = "0.3", features = ["client"] }
+
+[profile.release]
+lto = "thin"
+strip = true

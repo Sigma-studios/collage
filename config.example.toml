@@ -1,0 +1,10 @@
+# ~/.config/collage/config.toml — every key is optional; these are the defaults.
+
+history_limit = 500          # clipboard entries kept (notes are never trimmed)
+toast_duration_ms = 1400     # how long the toast stays fully visible
+toast_bottom_margin = 56     # distance from the bottom of the screen (above panels)
+toast_font_size = 15.0
+toast_preview = true         # show a preview of the copied text
+keep_clipboard = true        # keep the clipboard after the source app quits
+max_entry_bytes = 4194304    # ignore clipboard contents bigger than this
+tray = true                  # system tray icon
